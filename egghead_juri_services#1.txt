@@ -1,0 +1,252 @@
+https://egghead.io/lessons/angular-introducing-angular-service-injection-with-the-dependency-injector
+
+> Services + Registering service provider ==> this is where we should define the application logic, application state.
+> Service Aliases + Service Factory Function
+> How lazy loaded modules along with shared services, can cause u headache. This is called angular provider shadowing.
+
+---
+
+Service = class with constructor + @Injectable(). 
+(
+	@Injectable is required by Angular, i.e. to find at runtime, if this service has any other dependencies.
+	If it does not have any dependencies, then u can leave it out; but it is good practise to put it.
+)
+
+- providers:[PeopleService] in  *.module.ts 
+if parent and childcomponent, both use the PeopleService.getPerson(), then any change like setPerson() will update both parent and child.
+This is because PeopleService is a global Service. Both have the same singleton service.
+
+IMP NOTE: 
+	  providers:[PeopleService] is shortform for: 
+      providers:[
+		{ 
+			provide: PeopleService,
+			useClass: PeopleService
+		}
+	  ]
+	  (the long form is read as: provide me with this class name)
+	  
+---
+
+Q. What is we want any changes using setPerson() to affect only the parent comp? And NOT the child component??
+A. In child.component.ts, declare providers:[PersonService] . (Note: app.module.ts may also have it i think??).
+Since child already has it, then it will use its own separate instance and NOT the global one.
+
+This way, child, grand-childs will have access to the service defined in child.component.ts and NOT the global service by the same name
+
+IMP NOTE:-
+parent
+	<app-child> </app-child> and some ngIf conditions on toggling the child; everytime the toggle happens:-
+	> the old instance of the local PersonService (in child.component.ts) is destroyed.
+	> constructor is called everytime, which resets this local instance of PersonService.
+	> Global instance of PersonService continues to persist data, but local instances of PersonService do NOT persist and are destroyed by structural directives like ngIf.
+	
+---
+
+Define an aliased class provider
+Q. How do we overwrite an old class with a new class without making changes throughout our code base.
+
+in app.modules.ts
+old code:	providers: [ NewLoggerService, LoggerService ]
+new code:	providers: [ NewLoggerService, 
+							{ provide: LoggerService,
+							  useExisting: NewLoggerService
+							}
+						]
+						
+conditions:
+- APIs of NewLoggerService and LoggerService should be same; probably using an interface
+
+IMP NOTE:-
+> We can also use useClass: NewLoggerService, but that will be cause 2 instances of NewLoggerService; it will work, but there will be two instances;
+> Instead use best practise using useExisting: NewLoggerService which will create only 1 instance of NewLoggerService to replace the LoggerService instance.
+
+---
+
+Simplify a service using a JS obj as a Value Provider:
+
+in app.module.ts
+
+const simpleLogger = {
+	log(msg: string) : {		// VIMP: this should match the .log() API within our class. We are overriding the definition of that API here.
+		console.log (`m a simple logger ${msg} ` );
+	}
+};
+
+...
+providers: [
+				{
+					provide: LoggerService
+					useValue: simpleLogger
+				}
+]
+
+// Now, wherenever LoggerService.log() will be called, it will be overridden by simpleLogger.log(). 
+// simpleLogger can be moved to another file as well and then imported within app.module.ts.
+// This can be used for obfuscation of code and overriding class APIs without changing the classes themselves.
+
+---
+
+Recap:- using the fullform syntax, we saw how we can use 
+useClass: (replace class1 with class2, but if class2 is already injected, 2 instances of class2 will be created), 
+useExisting: (replace class1 with class2 , if class2 is already injected, ONLY 1 instance of class2/service2 will be created),
+useValue: (overriding class/service apis using a JS obj)
+
+Now lets see useFactory.
+useFactory: use a factory function to initialize constructors of service apis(eg. LoggerService.log() gives error otherwise)
+useFactory + deps: if factory function/provider uses another service, use deps: [ConsoleWriterService] along with useFactory.
+
+---
+
+Factory function/provider:-  "useFactory"
+Sometimes, an angular class can give errors, lets say that the class LoggerService has a complex logging mechanism like:
+
+Problem:-
+	export class LoggerService {
+		constructor (private isEnabled: boolean) {}
+		log (msg:string){
+			if (this.isEnabled) {					// Error: Static Injector Error: No provider for isEnabled.
+				// ... print something here
+			}
+		} // 
+	}
+
+
+Solution:-
+	const LoggerFactory = () => {
+		return new LoggerService(true); // In this factory function, we can now control what goes in or out.
+	}
+
+	...
+
+	providers: [
+		{
+			provide: LoggerService,
+			useFactory: loggerFactory
+		}
+	]
+
+
+---
+
+Pass dependencies to a factory provider.
+
+Problem:
+	service: ConsoleWriter::write() and LoggerService constructor is using it.
+			 LoggerService::constructor (private isEnabled: boolean, private writer: ConsoleWriter) {}
+			
+	providers: [
+					ConsoleWriter,
+					{
+						provide: LoggerService,
+						useFactory: loggerFactory,
+					}
+			   ]
+
+Sol#1:-			
+	const LoggerFactory = () => {
+		return new LoggerService(true, new ConsoleWriter()); // In this factory function, we can now control what goes in or out.
+	}
+	- uses the same providers[] array as above.
+	- but this is not using the angular's DI mechanism; so this code is not ideal
+			
+Sol#2:-
+	const LoggerFactory = (writer: ConsoleWriter) => {		// NOTE this.
+		return new LoggerService(true, writer); 			// Note this.
+	}
+
+		providers: [
+					ConsoleWriter,
+					{
+						provide: LoggerService,
+						useFactory: loggerFactory,
+						deps: [ ConsoleWriter ]				// NOTE this. VIMP. deps: [ ConsoleWriter, SomeOtherServ1, SomeOtherServ2 ]
+					}
+			   ]
+---
+
+========================================================================
+GOTCHA#1 :
+Overwrite a service in a component: useClass. This is a GOTCHA!!!
+
+app-component (Parent)
+	-> PeopleService
+	-> <app-person> (PersonComponent)	(Child#1 using Child1Service)
+		-> people:PeopleService				// has some default name like Juri
+			-> this.people.getPerson(){}
+			
+	-> create WomanComponent			(Child#2)
+			-> people:PeopleService
+			-> this.people.getPerson(){}
+		-> add <app-woman> (WomanComponent) to app.component.ts
+		
+	-> WomanService extends PeopleService	(Child#2 using Child2service)
+			-> person = super.getPerson() service.
+			-> person.name = 'Katie'
+			-> person.sex = 'F'
+			return person;
+			
+	-> In WomanComponent.ts	add these:-			
+		template: <app-person></app-person>
+		providers: [
+			{
+				provide: PeopleService,
+				useClass: WomanService
+			}
+		]
+		
+	VIMP!!!	NOW:-  from here on <app-person>/Child#1 will use WomanService and NOT the PeopleService, because of useClass.
+		
+		
+This is the heirarchy:-
+<app-root> - Module
+	<app-person>  ===> uses PeopleService
+	<app-woman>   ===> uses WomanService
+		<app-person> again . ===> This uses WomanService and NOT PeopleService; this is because of useClass!!!!
+			Unanswered Q.) ... any grandchild will also use WomanService ???		
+		
+---
+
+skipped: abstract DI token
+
+---
+skipped:
+
+@Optional: puts null value if heirarchial DI fails.
+@SkipSelf(): skip current component and start from immediate parent to upwards (till app.module.ts)
+@Host(): checks only current component and does not check anything else
+
+---
+		
+lazy loaded: allows u to create 2 instances of same service.
+
+		
+		
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
