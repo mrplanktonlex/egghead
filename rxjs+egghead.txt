@@ -1,0 +1,41 @@
+1. Convert Subjects to Observables:-
+
+	const click$ = new Subject();
+	document.addEventListener('click', function(ev){
+		click$.next(ev); // sending an event into the subject.
+	});
+	
+	click$.subscribe(function(ev){
+		console.log(ev);
+	});
+	
+// why this is a bad idea:
+	- click$ is available globally to used by any construct to send data into the subject.
+	- the stream is not getting destroyed.
+	
+Solution:- 
+	- We can convert the subject into an observable and eliminate these problems:-
+	> use Observable.create()	
+		
+		const click$ = new Observable.create(
+			function subscribe( observer ) {	// basically the main logic code is moved to "custom-subscribe"
+				document.addEventListener('click', function(ev){
+					observer.next(ev); // sending an event into the subject.
+				});
+				
+				return function unsubscribe() { // fires when u use subscription.unsubscribe, where subscription is LHS of some.subscribe();
+					// disposal code.
+					document.removeEventListener('click', <reference to function of addEventListener> ) // note:- if it was anonymous that code should be a function declaration.
+				}
+			} // subscribe ends
+		); // click$ streams definition ends.
+		
+		const subscription = click$.subscribe(function(ev){
+								console.log(ev);	
+							});
+
+		setTimeout( function() {
+			subscription.unsubscribe();
+		}, 4000);					
+		
+- understand diff. between observable.create(); confused on basics of streams after newborn.		
